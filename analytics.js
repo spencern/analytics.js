@@ -175,7 +175,7 @@ var _analytics = window.analytics;
 var Emitter = require('emitter');
 var Facade = require('facade');
 var after = require('after');
-var bind = require('bind');
+var bindAll = require('bind-all');
 var callback = require('callback');
 var clone = require('clone');
 var cookie = require('./cookie');
@@ -230,7 +230,7 @@ function Analytics() {
   // XXX: BACKWARDS COMPATIBILITY
   this._user = user;
   this.log = debug('analytics.js');
-  bind.all(this);
+  bindAll(this);
 
   var self = this;
   this.on('initialize', function(settings, options){
@@ -856,7 +856,7 @@ Analytics.prototype.noConflict = function(){
   return this;
 };
 
-}, {"emitter":8,"facade":9,"after":10,"bind":11,"callback":12,"clone":13,"./cookie":14,"debug":15,"defaults":16,"each":4,"foldl":17,"./group":18,"is":19,"is-meta":20,"object":21,"./memory":22,"./normalize":23,"event":24,"./pageDefaults":25,"pick":26,"prevent":27,"querystring":28,"./store":29,"./user":30}],
+}, {"emitter":8,"facade":9,"after":10,"bind-all":11,"callback":12,"clone":13,"./cookie":14,"debug":15,"defaults":16,"each":4,"foldl":17,"./group":18,"is":19,"is-meta":20,"object":21,"./memory":22,"./normalize":23,"event":24,"./pageDefaults":25,"pick":26,"prevent":27,"querystring":28,"./store":29,"./user":30}],
 8: [function(require, module, exports) {
 
 /**
@@ -1075,13 +1075,18 @@ module.exports = Facade;
  * Initialize a new `Facade` with an `obj` of arguments.
  *
  * @param {Object} obj
+ * @param {Object} opts
  */
 
-function Facade (obj) {
-  obj = clone(obj);
-  if (!obj.hasOwnProperty('timestamp')) obj.timestamp = new Date();
+function Facade(obj, opts) {
+  opts = opts || {};
+  if (!('clone' in opts)) opts.clone = true;
+  if (opts.clone) obj = clone(obj);
+  if (!('traverse' in opts)) opts.traverse = true;
+  if (!('timestamp' in obj)) obj.timestamp = new Date();
   else obj.timestamp = newDate(obj.timestamp);
-  traverse(obj);
+  if (opts.traverse) traverse(obj);
+  this.opts = opts;
   this.obj = obj;
 }
 
@@ -1101,7 +1106,7 @@ address(Facade.prototype);
  * @param {String} field
  */
 
-Facade.prototype.proxy = function (field) {
+Facade.prototype.proxy = function(field) {
   var fields = field.split('.');
   field = fields.shift();
 
@@ -1109,10 +1114,10 @@ Facade.prototype.proxy = function (field) {
   var obj = this[field] || this.field(field);
   if (!obj) return obj;
   if (typeof obj === 'function') obj = obj.call(this) || {};
-  if (fields.length === 0) return transform(obj);
+  if (fields.length === 0) return this.opts.clone ? transform(obj) : obj;
 
   obj = objCase(obj, fields.join('.'));
-  return transform(obj);
+  return this.opts.clone ? transform(obj) : obj;
 };
 
 /**
@@ -1123,9 +1128,9 @@ Facade.prototype.proxy = function (field) {
  * @return {Mixed}
  */
 
-Facade.prototype.field = function (field) {
+Facade.prototype.field = function(field) {
   var obj = this.obj[field];
-  return transform(obj);
+  return this.opts.clone ? transform(obj) : obj;
 };
 
 /**
@@ -1138,8 +1143,8 @@ Facade.prototype.field = function (field) {
  * @return {Function}
  */
 
-Facade.proxy = function (field) {
-  return function () {
+Facade.proxy = function(field) {
+  return function() {
     return this.proxy(field);
   };
 };
@@ -1151,8 +1156,8 @@ Facade.proxy = function (field) {
  * @return {Function}
  */
 
-Facade.field = function (field) {
-  return function () {
+Facade.field = function(field) {
+  return function() {
     return this.field(field);
   };
 };
@@ -1164,12 +1169,12 @@ Facade.field = function (field) {
  * @return {Array}
  */
 
-Facade.multi = function(path){
-  return function(){
+Facade.multi = function(path) {
+  return function() {
     var multi = this.proxy(path + 's');
-    if ('array' == type(multi)) return multi;
+    if (type(multi) === 'array') return multi;
     var one = this.proxy(path);
-    if (one) one = [clone(one)];
+    if (one) one = [this.opts.clone ? clone(one) : one];
     return one || [];
   };
 };
@@ -1181,12 +1186,12 @@ Facade.multi = function(path){
  * @return {Mixed}
  */
 
-Facade.one = function(path){
-  return function(){
+Facade.one = function(path) {
+  return function() {
     var one = this.proxy(path);
     if (one) return one;
     var multi = this.proxy(path + 's');
-    if ('array' == type(multi)) return multi[0];
+    if (type(multi) === 'array') return multi[0];
   };
 };
 
@@ -1196,8 +1201,8 @@ Facade.one = function(path){
  * @return {Object}
  */
 
-Facade.prototype.json = function () {
-  var ret = clone(this.obj);
+Facade.prototype.json = function() {
+  var ret = this.opts.clone ? clone(this.obj) : this.obj;
   if (this.type) ret.type = this.type();
   return ret;
 };
@@ -1211,16 +1216,18 @@ Facade.prototype.json = function () {
  * @return {Object or Null}
  */
 
-Facade.prototype.context =
-Facade.prototype.options = function (integration) {
-  var options = clone(this.obj.options || this.obj.context) || {};
-  if (!integration) return clone(options);
+Facade.prototype.options = function(integration) {
+  var obj = this.obj.options || this.obj.context || {};
+  var options = this.opts.clone ? clone(obj) : obj;
+  if (!integration) return options;
   if (!this.enabled(integration)) return;
   var integrations = this.integrations();
   var value = integrations[integration] || objCase(integrations, integration);
-  if ('boolean' == typeof value) value = {};
-  return value || {};
+  if (typeof value !== 'object') value = objCase(this.options(), integration);
+  return typeof value === 'object' ? value : {};
 };
+
+Facade.prototype.context = Facade.prototype.options;
 
 /**
  * Check whether an integration is enabled.
@@ -1229,7 +1236,7 @@ Facade.prototype.options = function (integration) {
  * @return {Boolean}
  */
 
-Facade.prototype.enabled = function (integration) {
+Facade.prototype.enabled = function(integration) {
   var allEnabled = this.proxy('options.providers.all');
   if (typeof allEnabled !== 'boolean') allEnabled = this.proxy('options.all');
   if (typeof allEnabled !== 'boolean') allEnabled = this.proxy('integrations.all');
@@ -1255,7 +1262,7 @@ Facade.prototype.enabled = function (integration) {
     }
   }
 
-  return enabled ? true : false;
+  return !!enabled;
 };
 
 /**
@@ -1266,7 +1273,7 @@ Facade.prototype.enabled = function (integration) {
  * @api private
  */
 
-Facade.prototype.integrations = function(){
+Facade.prototype.integrations = function() {
   return this.obj.integrations
     || this.proxy('options.providers')
     || this.options();
@@ -1278,7 +1285,7 @@ Facade.prototype.integrations = function(){
  * @return {Boolean}
  */
 
-Facade.prototype.active = function () {
+Facade.prototype.active = function() {
   var active = this.proxy('options.active');
   if (active === null || active === undefined) active = true;
   return active;
@@ -1291,11 +1298,12 @@ Facade.prototype.active = function () {
  * @api public
  */
 
-Facade.prototype.sessionId =
-Facade.prototype.anonymousId = function(){
+Facade.prototype.anonymousId = function() {
   return this.field('anonymousId')
     || this.field('sessionId');
 };
+
+Facade.prototype.sessionId = Facade.prototype.anonymousId;
 
 /**
  * Get `groupId` from `context.groupId`.
@@ -1314,7 +1322,7 @@ Facade.prototype.groupId = Facade.proxy('options.groupId');
  * @return {Object}
  */
 
-Facade.prototype.traits = function (aliases) {
+Facade.prototype.traits = function(aliases) {
   var ret = this.proxy('options.traits') || {};
   var id = this.userId();
   aliases = aliases || {};
@@ -1322,10 +1330,8 @@ Facade.prototype.traits = function (aliases) {
   if (id) ret.id = id;
 
   for (var alias in aliases) {
-    var value = null == this[alias]
-      ? this.proxy('options.traits.' + alias)
-      : this[alias]();
-    if (null == value) continue;
+    var value = this[alias] == null ? this.proxy('options.traits.' + alias) : this[alias]();
+    if (value == null) continue;
     ret[aliases[alias]] = value;
     delete ret[alias];
   }
@@ -1337,7 +1343,7 @@ Facade.prototype.traits = function (aliases) {
  * Add a convenient way to get the library name and version
  */
 
-Facade.prototype.library = function(){
+Facade.prototype.library = function() {
   var library = this.proxy('options.library');
   if (!library) return { name: 'unknown', version: null };
   if (typeof library === 'string') return { name: library, version: null };
@@ -1345,14 +1351,32 @@ Facade.prototype.library = function(){
 };
 
 /**
+ * Return the device information or an empty object
+ *
+ * @return {Object}
+ */
+
+Facade.prototype.device = function() {
+  var device = this.proxy('context.device');
+  if (type(device) !== 'object') device = {};
+  var library = this.library().name;
+  if (device.type) return device;
+
+  if (library.indexOf('ios') > -1) device.type = 'ios';
+  if (library.indexOf('android') > -1) device.type = 'android';
+  return device;
+};
+
+/**
  * Setup some basic proxies.
  */
 
-Facade.prototype.userId = Facade.field('userId');
-Facade.prototype.channel = Facade.field('channel');
+Facade.prototype.userAgent = Facade.proxy('context.userAgent');
+Facade.prototype.timezone = Facade.proxy('context.timezone');
 Facade.prototype.timestamp = Facade.field('timestamp');
-Facade.prototype.userAgent = Facade.proxy('options.userAgent');
-Facade.prototype.ip = Facade.proxy('options.ip');
+Facade.prototype.channel = Facade.field('channel');
+Facade.prototype.ip = Facade.proxy('context.ip');
+Facade.prototype.userId = Facade.field('userId');
 
 /**
  * Return the cloned and traversed object
@@ -1361,7 +1385,7 @@ Facade.prototype.ip = Facade.proxy('options.ip');
  * @return {Mixed}
  */
 
-function transform(obj){
+function transform(obj) {
   var cloned = clone(obj);
   return cloned;
 }
@@ -1542,11 +1566,13 @@ var has = Object.prototype.hasOwnProperty;
 
 function isEmpty (val) {
   if (null == val) return true;
+  if ('boolean' == typeof val) return false;
   if ('number' == typeof val) return 0 === val;
   if (undefined !== val.length) return 0 === val.length;
   for (var key in val) if (has.call(val, key)) return false;
   return true;
 }
+
 }, {}],
 48: [function(require, module, exports) {
 /**
@@ -1577,14 +1603,24 @@ module.exports = function(val){
   if (val !== val) return 'nan';
   if (val && val.nodeType === 1) return 'element';
 
-  if (typeof Buffer != 'undefined' && Buffer.isBuffer(val)) return 'buffer';
+  if (isBuffer(val)) return 'buffer';
 
   val = val.valueOf
     ? val.valueOf()
-    : Object.prototype.valueOf.apply(val)
+    : Object.prototype.valueOf.apply(val);
 
   return typeof val;
 };
+
+// code borrowed from https://github.com/feross/is-buffer/blob/master/index.js
+function isBuffer(obj) {
+  return !!(obj != null &&
+    (obj._isBuffer || // For Safari 5-7 (missing Object.prototype.constructor)
+      (obj.constructor &&
+      typeof obj.constructor.isBuffer === 'function' &&
+      obj.constructor.isBuffer(obj))
+    ))
+}
 
 }, {}],
 46: [function(require, module, exports) {
@@ -1751,13 +1787,14 @@ var disabled = {
 /**
  * Check whether an integration should be enabled by default.
  *
- * @param {String} integration
- * @return {Boolean}
+ * @param {string} integration
+ * @return {boolean}
  */
 
-module.exports = function (integration) {
-  return ! disabled[integration];
+module.exports = function(integration) {
+  return !disabled[integration];
 };
+
 }, {}],
 41: [function(require, module, exports) {
 
@@ -1859,15 +1896,16 @@ var get = require('obj-case');
  * @param {Function} proto
  */
 
-module.exports = function(proto){
+module.exports = function(proto) {
   proto.zip = trait('postalCode', 'zip');
   proto.country = trait('country');
   proto.street = trait('street');
   proto.state = trait('state');
   proto.city = trait('city');
+  proto.region = trait('region');
 
-  function trait(a, b){
-    return function(){
+  function trait(a, b) {
+    return function() {
       var traits = this.traits();
       var props = this.properties ? this.properties() : {};
 
@@ -2240,10 +2278,12 @@ module.exports = Alias;
  *   @property {String} from
  *   @property {String} to
  *   @property {Object} options
+ * @param {Object} opts
+ *   @property {Boolean|Undefined} clone
  */
 
-function Alias (dictionary) {
-  Facade.call(this, dictionary);
+function Alias(dictionary, opts) {
+  Facade.call(this, dictionary, opts);
 }
 
 /**
@@ -2258,10 +2298,11 @@ inherit(Alias, Facade);
  * @return {String}
  */
 
-Alias.prototype.type =
-Alias.prototype.action = function () {
+Alias.prototype.action = function() {
   return 'alias';
 };
+
+Alias.prototype.type = Alias.prototype.action;
 
 /**
  * Get `previousId`.
@@ -2270,11 +2311,12 @@ Alias.prototype.action = function () {
  * @api public
  */
 
-Alias.prototype.from =
-Alias.prototype.previousId = function(){
+Alias.prototype.previousId = function() {
   return this.field('previousId')
     || this.field('from');
 };
+
+Alias.prototype.from = Alias.prototype.previousId;
 
 /**
  * Get `userId`.
@@ -2283,11 +2325,12 @@ Alias.prototype.previousId = function(){
  * @api public
  */
 
-Alias.prototype.to =
-Alias.prototype.userId = function(){
+Alias.prototype.userId = function() {
   return this.field('userId')
     || this.field('to');
 };
+
+Alias.prototype.to = Alias.prototype.userId;
 
 }, {"./utils":41,"./facade":32}],
 34: [function(require, module, exports) {
@@ -2297,7 +2340,6 @@ Alias.prototype.userId = function(){
  */
 
 var inherit = require('./utils').inherit;
-var address = require('./address');
 var isEmail = require('is-email');
 var newDate = require('new-date');
 var Facade = require('./facade');
@@ -2316,10 +2358,12 @@ module.exports = Group;
  *   @param {String} groupId
  *   @param {Object} properties
  *   @param {Object} options
+ * @param {Object} opts
+ *   @property {Boolean|Undefined} clone
  */
 
-function Group (dictionary) {
-  Facade.call(this, dictionary);
+function Group(dictionary, opts) {
+  Facade.call(this, dictionary, opts);
 }
 
 /**
@@ -2332,10 +2376,11 @@ inherit(Group, Facade);
  * Get the facade's action.
  */
 
-Group.prototype.type =
-Group.prototype.action = function () {
+Group.prototype.action = function() {
   return 'group';
 };
+
+Group.prototype.type = Group.prototype.action;
 
 /**
  * Setup some basic proxies.
@@ -2349,7 +2394,7 @@ Group.prototype.groupId = Facade.field('groupId');
  * @return {Date}
  */
 
-Group.prototype.created = function(){
+Group.prototype.created = function() {
   var created = this.proxy('traits.createdAt')
     || this.proxy('traits.created')
     || this.proxy('properties.createdAt')
@@ -2364,7 +2409,7 @@ Group.prototype.created = function(){
  * @return {String}
  */
 
-Group.prototype.email = function () {
+Group.prototype.email = function() {
   var email = this.proxy('traits.email');
   if (email) return email;
   var groupId = this.groupId();
@@ -2378,7 +2423,7 @@ Group.prototype.email = function () {
  * @return {Object}
  */
 
-Group.prototype.traits = function (aliases) {
+Group.prototype.traits = function(aliases) {
   var ret = this.properties();
   var id = this.groupId();
   aliases = aliases || {};
@@ -2386,10 +2431,8 @@ Group.prototype.traits = function (aliases) {
   if (id) ret.id = id;
 
   for (var alias in aliases) {
-    var value = null == this[alias]
-      ? this.proxy('traits.' + alias)
-      : this[alias]();
-    if (null == value) continue;
+    var value = this[alias] == null ? this.proxy('traits.' + alias) : this[alias]();
+    if (value == null) continue;
     ret[aliases[alias]] = value;
     delete ret[alias];
   }
@@ -2413,13 +2456,11 @@ Group.prototype.employees = Facade.proxy('traits.employees');
  * @return {Object}
  */
 
-Group.prototype.properties = function(){
-  return this.field('traits')
-    || this.field('properties')
-    || {};
+Group.prototype.properties = function() {
+  return this.field('traits') || this.field('properties') || {};
 };
 
-}, {"./utils":41,"./address":42,"is-email":54,"new-date":44,"./facade":32}],
+}, {"./utils":41,"is-email":54,"new-date":44,"./facade":32}],
 54: [function(require, module, exports) {
 
 /**
@@ -2449,7 +2490,6 @@ function isEmail (string) {
 }, {}],
 35: [function(require, module, exports) {
 
-var address = require('./address');
 var Facade = require('./facade');
 var isEmail = require('is-email');
 var newDate = require('new-date');
@@ -2457,7 +2497,6 @@ var utils = require('./utils');
 var get = require('obj-case');
 var trim = require('trim');
 var inherit = utils.inherit;
-var clone = utils.clone;
 var type = utils.type;
 
 /**
@@ -2474,10 +2513,12 @@ module.exports = Identify;
  *   @param {String} sessionId
  *   @param {Object} traits
  *   @param {Object} options
+ * @param {Object} opts
+ *   @property {Boolean|Undefined} clone
  */
 
-function Identify (dictionary) {
-  Facade.call(this, dictionary);
+function Identify(dictionary, opts) {
+  Facade.call(this, dictionary, opts);
 }
 
 /**
@@ -2490,10 +2531,11 @@ inherit(Identify, Facade);
  * Get the facade's action.
  */
 
-Identify.prototype.type =
-Identify.prototype.action = function () {
+Identify.prototype.action = function() {
   return 'identify';
 };
+
+Identify.prototype.type = Identify.prototype.action;
 
 /**
  * Get the user's traits.
@@ -2502,7 +2544,7 @@ Identify.prototype.action = function () {
  * @return {Object}
  */
 
-Identify.prototype.traits = function (aliases) {
+Identify.prototype.traits = function(aliases) {
   var ret = this.field('traits') || {};
   var id = this.userId();
   aliases = aliases || {};
@@ -2510,10 +2552,8 @@ Identify.prototype.traits = function (aliases) {
   if (id) ret.id = id;
 
   for (var alias in aliases) {
-    var value = null == this[alias]
-      ? this.proxy('traits.' + alias)
-      : this[alias]();
-    if (null == value) continue;
+    var value = this[alias] == null ? this.proxy('traits.' + alias) : this[alias]();
+    if (value == null) continue;
     ret[aliases[alias]] = value;
     if (alias !== aliases[alias]) delete ret[alias];
   }
@@ -2527,7 +2567,7 @@ Identify.prototype.traits = function (aliases) {
  * @return {String}
  */
 
-Identify.prototype.email = function () {
+Identify.prototype.email = function() {
   var email = this.proxy('traits.email');
   if (email) return email;
 
@@ -2542,7 +2582,7 @@ Identify.prototype.email = function () {
  * @return {Date or Undefined}
  */
 
-Identify.prototype.created = function () {
+Identify.prototype.created = function() {
   var created = this.proxy('traits.created') || this.proxy('traits.createdAt');
   if (created) return newDate(created);
 };
@@ -2553,7 +2593,7 @@ Identify.prototype.created = function () {
  * @return {Date or undefined}
  */
 
-Identify.prototype.companyCreated = function(){
+Identify.prototype.companyCreated = function() {
   var created = this.proxy('traits.company.created')
     || this.proxy('traits.company.createdAt');
 
@@ -2564,10 +2604,10 @@ Identify.prototype.companyCreated = function(){
  * Get the user's name, optionally combining a first and last name if that's all
  * that was provided.
  *
- * @return {String or Undefined}
+ * @return {string|undefined}
  */
 
-Identify.prototype.name = function () {
+Identify.prototype.name = function() {
   var name = this.proxy('traits.name');
   if (typeof name === 'string') return trim(name);
 
@@ -2580,10 +2620,10 @@ Identify.prototype.name = function () {
  * Get the user's first name, optionally splitting it out of a single name if
  * that's all that was provided.
  *
- * @return {String or Undefined}
+ * @return {string|undefined}
  */
 
-Identify.prototype.firstName = function () {
+Identify.prototype.firstName = function() {
   var firstName = this.proxy('traits.firstName');
   if (typeof firstName === 'string') return trim(firstName);
 
@@ -2595,10 +2635,10 @@ Identify.prototype.firstName = function () {
  * Get the user's last name, optionally splitting it out of a single name if
  * that's all that was provided.
  *
- * @return {String or Undefined}
+ * @return {string|undefined}
  */
 
-Identify.prototype.lastName = function () {
+Identify.prototype.lastName = function() {
   var lastName = this.proxy('traits.lastName');
   if (typeof lastName === 'string') return trim(lastName);
 
@@ -2617,10 +2657,8 @@ Identify.prototype.lastName = function () {
  * @return {String or undefined}
  */
 
-Identify.prototype.uid = function(){
-  return this.userId()
-    || this.username()
-    || this.email();
+Identify.prototype.uid = function() {
+  return this.userId() || this.username() || this.email();
 };
 
 /**
@@ -2629,9 +2667,8 @@ Identify.prototype.uid = function(){
  * @return {String}
  */
 
-Identify.prototype.description = function(){
-  return this.proxy('traits.description')
-    || this.proxy('traits.background');
+Identify.prototype.description = function() {
+  return this.proxy('traits.description') || this.proxy('traits.background');
 };
 
 /**
@@ -2644,12 +2681,12 @@ Identify.prototype.description = function(){
  * @return {Number}
  */
 
-Identify.prototype.age = function(){
+Identify.prototype.age = function() {
   var date = this.birthday();
   var age = get(this.traits(), 'age');
-  if (null != age) return age;
-  if ('date' != type(date)) return;
-  var now = new Date;
+  if (age != null) return age;
+  if (type(date) !== 'date') return;
+  var now = new Date();
   return now.getFullYear() - date.getFullYear();
 };
 
@@ -2664,7 +2701,7 @@ Identify.prototype.age = function(){
  * @return {Mixed}
  */
 
-Identify.prototype.avatar = function(){
+Identify.prototype.avatar = function() {
   var traits = this.traits();
   return get(traits, 'avatar')
     || get(traits, 'photoUrl')
@@ -2679,7 +2716,7 @@ Identify.prototype.avatar = function(){
  * @return {Mixed}
  */
 
-Identify.prototype.position = function(){
+Identify.prototype.position = function() {
   var traits = this.traits();
   return get(traits, 'position') || get(traits, 'jobTitle');
 };
@@ -2697,7 +2734,7 @@ Identify.prototype.address = Facade.proxy('traits.address');
 Identify.prototype.gender = Facade.proxy('traits.gender');
 Identify.prototype.birthday = Facade.proxy('traits.birthday');
 
-}, {"./address":42,"./facade":32,"is-email":54,"new-date":44,"./utils":41,"obj-case":43,"trim":55}],
+}, {"./facade":32,"is-email":54,"new-date":44,"./utils":41,"obj-case":43,"trim":55}],
 55: [function(require, module, exports) {
 
 exports = module.exports = trim;
@@ -2721,7 +2758,6 @@ exports.right = function(str){
 36: [function(require, module, exports) {
 
 var inherit = require('./utils').inherit;
-var clone = require('./utils').clone;
 var type = require('./utils').type;
 var Facade = require('./facade');
 var Identify = require('./identify');
@@ -2738,15 +2774,17 @@ module.exports = Track;
  * Initialize a new `Track` facade with a `dictionary` of arguments.
  *
  * @param {object} dictionary
- *   @property {String} event
- *   @property {String} userId
- *   @property {String} sessionId
+ *   @property {string} event
+ *   @property {string} userId
+ *   @property {string} sessionId
  *   @property {Object} properties
  *   @property {Object} options
+ * @param {Object} opts
+ *   @property {boolean|undefined} clone
  */
 
-function Track (dictionary) {
-  Facade.call(this, dictionary);
+function Track(dictionary, opts) {
+  Facade.call(this, dictionary, opts);
 }
 
 /**
@@ -2758,13 +2796,14 @@ inherit(Track, Facade);
 /**
  * Return the facade's action.
  *
- * @return {String}
+ * @return {string}
  */
 
-Track.prototype.type =
-Track.prototype.action = function () {
+Track.prototype.action = function() {
   return 'track';
 };
+
+Track.prototype.type = Track.prototype.action;
 
 /**
  * Setup some basic proxies.
@@ -2789,6 +2828,7 @@ Track.prototype.tax = Facade.proxy('properties.tax');
 Track.prototype.name = Facade.proxy('properties.name');
 Track.prototype.price = Facade.proxy('properties.price');
 Track.prototype.total = Facade.proxy('properties.total');
+Track.prototype.repeat = Facade.proxy('properties.repeat');
 Track.prototype.coupon = Facade.proxy('properties.coupon');
 Track.prototype.shipping = Facade.proxy('properties.shipping');
 Track.prototype.discount = Facade.proxy('properties.discount');
@@ -2808,11 +2848,10 @@ Track.prototype.plan = Facade.proxy('properties.plan');
 /**
  * Order id.
  *
- * @return {String}
- * @api public
+ * @return {string}
  */
 
-Track.prototype.orderId = function(){
+Track.prototype.orderId = function() {
   return this.proxy('properties.id')
     || this.proxy('properties.orderId');
 };
@@ -2820,19 +2859,22 @@ Track.prototype.orderId = function(){
 /**
  * Get subtotal.
  *
- * @return {Number}
+ * @return {number}
  */
 
-Track.prototype.subtotal = function(){
+Track.prototype.subtotal = function() {
   var subtotal = get(this.properties(), 'subtotal');
   var total = this.total();
-  var n;
 
   if (subtotal) return subtotal;
   if (!total) return 0;
-  if (n = this.tax()) total -= n;
-  if (n = this.shipping()) total -= n;
-  if (n = this.discount()) total += n;
+
+  var n = this.tax();
+  if (n) total -= n;
+  n = this.shipping();
+  if (n) total -= n;
+  n = this.discount();
+  if (n) total += n;
 
   return total;
 };
@@ -2843,21 +2885,19 @@ Track.prototype.subtotal = function(){
  * @return {Array}
  */
 
-Track.prototype.products = function(){
+Track.prototype.products = function() {
   var props = this.properties();
   var products = get(props, 'products');
-  return 'array' == type(products)
-    ? products
-    : [];
+  return type(products) === 'array' ? products : [];
 };
 
 /**
  * Get quantity.
  *
- * @return {Number}
+ * @return {number}
  */
 
-Track.prototype.quantity = function(){
+Track.prototype.quantity = function() {
   var props = this.obj.properties || {};
   return props.quantity || 1;
 };
@@ -2865,10 +2905,10 @@ Track.prototype.quantity = function(){
 /**
  * Get currency.
  *
- * @return {String}
+ * @return {string}
  */
 
-Track.prototype.currency = function(){
+Track.prototype.currency = function() {
   var props = this.obj.properties || {};
   return props.currency || 'USD';
 };
@@ -2877,7 +2917,12 @@ Track.prototype.currency = function(){
  * BACKWARDS COMPATIBILITY: should probably re-examine where these come from.
  */
 
-Track.prototype.referrer = Facade.proxy('properties.referrer');
+Track.prototype.referrer = function() {
+  return this.proxy('context.referrer.url')
+    || this.proxy('context.page.referrer')
+    || this.proxy('properties.referrer');
+};
+
 Track.prototype.query = Facade.proxy('options.query');
 
 /**
@@ -2887,15 +2932,13 @@ Track.prototype.query = Facade.proxy('options.query');
  * @return {Object}
  */
 
-Track.prototype.properties = function (aliases) {
+Track.prototype.properties = function(aliases) {
   var ret = this.field('properties') || {};
   aliases = aliases || {};
 
   for (var alias in aliases) {
-    var value = null == this[alias]
-      ? this.proxy('properties.' + alias)
-      : this[alias]();
-    if (null == value) continue;
+    var value = this[alias] == null ? this.proxy('properties.' + alias) : this[alias]();
+    if (value == null) continue;
     ret[aliases[alias]] = value;
     delete ret[alias];
   }
@@ -2906,25 +2949,26 @@ Track.prototype.properties = function (aliases) {
 /**
  * Get the call's username.
  *
- * @return {String or Undefined}
+ * @return {string|undefined}
  */
 
-Track.prototype.username = function () {
-  return this.proxy('traits.username') ||
-         this.proxy('properties.username') ||
-         this.userId() ||
-         this.sessionId();
+Track.prototype.username = function() {
+  return this.proxy('traits.username')
+    || this.proxy('properties.username')
+    || this.userId()
+    || this.sessionId();
 };
 
 /**
  * Get the call's email, using an the user ID if it's a valid email.
  *
- * @return {String or Undefined}
+ * @return {string|undefined}
  */
 
-Track.prototype.email = function () {
-  var email = this.proxy('traits.email');
-  email = email || this.proxy('properties.email');
+Track.prototype.email = function() {
+  var email = this.proxy('traits.email')
+  || this.proxy('properties.email')
+  || this.proxy('options.traits.email');
   if (email) return email;
 
   var userId = this.userId();
@@ -2947,10 +2991,10 @@ Track.prototype.email = function () {
  * because on their backend they assume tax and shipping has been applied to
  * the value, and so can get the revenue on their own.
  *
- * @return {Number}
+ * @return {number}
  */
 
-Track.prototype.revenue = function () {
+Track.prototype.revenue = function() {
   var revenue = this.proxy('properties.revenue');
   var event = this.event();
 
@@ -2965,14 +3009,12 @@ Track.prototype.revenue = function () {
 /**
  * Get cents.
  *
- * @return {Number}
+ * @return {number}
  */
 
-Track.prototype.cents = function(){
+Track.prototype.cents = function() {
   var revenue = this.revenue();
-  return 'number' != typeof revenue
-    ? this.value() || 0
-    : revenue * 100;
+  return typeof revenue !== 'number' ? this.value() || 0 : revenue * 100;
 };
 
 /**
@@ -2984,17 +3026,17 @@ Track.prototype.cents = function(){
  * @return {Facade}
  */
 
-Track.prototype.identify = function () {
+Track.prototype.identify = function() {
   var json = this.json();
   json.traits = this.traits();
-  return new Identify(json);
+  return new Identify(json, this.opts);
 };
 
 /**
  * Get float from currency value.
  *
  * @param {Mixed} val
- * @return {Number}
+ * @return {number}
  */
 
 function currency(val) {
@@ -3014,6 +3056,8 @@ function currency(val) {
 var inherit = require('./utils').inherit;
 var Facade = require('./facade');
 var Track = require('./track');
+var isEmail = require('is-email');
+
 
 /**
  * Expose `Page` facade
@@ -3029,10 +3073,12 @@ module.exports = Page;
  *   @param {String} name
  *   @param {Object} traits
  *   @param {Object} options
+ * @param {Object} opts
+ *   @property {Boolean|Undefined} clone
  */
 
-function Page(dictionary){
-  Facade.call(this, dictionary);
+function Page(dictionary, opts) {
+  Facade.call(this, dictionary, opts);
 }
 
 /**
@@ -3047,10 +3093,11 @@ inherit(Page, Facade);
  * @return {String}
  */
 
-Page.prototype.type =
-Page.prototype.action = function(){
+Page.prototype.action = function() {
   return 'page';
 };
+
+Page.prototype.type = Page.prototype.action;
 
 /**
  * Fields
@@ -3071,9 +3118,10 @@ Page.prototype.url = Facade.proxy('properties.url');
  * Referrer.
  */
 
-Page.prototype.referrer = function(){
-  return this.proxy('properties.referrer')
-    || this.proxy('context.referrer.url');
+Page.prototype.referrer = function() {
+  return this.proxy('context.referrer.url')
+    || this.proxy('context.page.referrer')
+    || this.proxy('properties.referrer');
 };
 
 /**
@@ -3105,12 +3153,26 @@ Page.prototype.properties = function(aliases) {
 };
 
 /**
+ * Get the user's email, falling back to their user ID if it's a valid email.
+ *
+ * @return {String}
+ */
+
+Page.prototype.email = function() {
+  var email = this.proxy('context.traits.email') || this.proxy('properties.email');
+  if (email) return email;
+
+  var userId = this.userId();
+  if (isEmail(userId)) return userId;
+};
+
+/**
  * Get the page fullName.
  *
  * @return {String}
  */
 
-Page.prototype.fullName = function(){
+Page.prototype.fullName = function() {
   var category = this.category();
   var name = this.name();
   return name && category
@@ -3124,7 +3186,7 @@ Page.prototype.fullName = function(){
  * @return {String}
  */
 
-Page.prototype.event = function(name){
+Page.prototype.event = function(name) {
   return name
     ? 'Viewed ' + name + ' Page'
     : 'Loaded a Page';
@@ -3137,17 +3199,15 @@ Page.prototype.event = function(name){
  * @return {Track}
  */
 
-Page.prototype.track = function(name){
-  var props = this.properties();
-  return new Track({
-    event: this.event(name),
-    timestamp: this.timestamp(),
-    context: this.context(),
-    properties: props
-  });
+Page.prototype.track = function(name) {
+  var json = this.json();
+  json.event = this.event(name);
+  json.timestamp = this.timestamp();
+  json.properties = this.properties();
+  return new Track(json, this.opts);
 };
 
-}, {"./utils":41,"./facade":32,"./track":36}],
+}, {"./utils":41,"./facade":32,"./track":36,"is-email":54}],
 38: [function(require, module, exports) {
 
 var inherit = require('./utils').inherit;
@@ -3164,14 +3224,16 @@ module.exports = Screen;
  * Initialize new `Screen` facade with `dictionary`.
  *
  * @param {Object} dictionary
- *   @param {String} category
- *   @param {String} name
+ *   @param {string} category
+ *   @param {string} name
  *   @param {Object} traits
  *   @param {Object} options
+ * @param {Object} opts
+ *   @property {boolean|undefined} clone
  */
 
-function Screen(dictionary){
-  Page.call(this, dictionary);
+function Screen(dictionary, opts) {
+  Page.call(this, dictionary, opts);
 }
 
 /**
@@ -3183,45 +3245,42 @@ inherit(Screen, Page);
 /**
  * Get the facade's action.
  *
- * @return {String}
+ * @return {string}
  * @api public
  */
 
-Screen.prototype.type =
-Screen.prototype.action = function(){
+Screen.prototype.action = function() {
   return 'screen';
 };
+
+Screen.prototype.type = Screen.prototype.action;
 
 /**
  * Get event with `name`.
  *
- * @param {String} name
- * @return {String}
+ * @param {string} name
+ * @return {string}
  * @api public
  */
 
-Screen.prototype.event = function(name){
-  return name
-    ? 'Viewed ' + name + ' Screen'
-    : 'Loaded a Screen';
+Screen.prototype.event = function(name) {
+  return name ? 'Viewed ' + name + ' Screen' : 'Loaded a Screen';
 };
 
 /**
  * Convert this Screen.
  *
- * @param {String} name
+ * @param {string} name
  * @return {Track}
  * @api public
  */
 
-Screen.prototype.track = function(name){
-  var props = this.properties();
-  return new Track({
-    event: this.event(name),
-    timestamp: this.timestamp(),
-    context: this.context(),
-    properties: props
-  });
+Screen.prototype.track = function(name) {
+  var json = this.json();
+  json.event = this.event(name);
+  json.timestamp = this.timestamp();
+  json.properties = this.properties();
+  return new Track(json, this.opts);
 };
 
 }, {"./utils":41,"./page":37,"./track":36}],
@@ -3243,49 +3302,20 @@ module.exports = function after (times, func) {
 
 try {
   var bind = require('bind');
+  var type = require('type');
 } catch (e) {
   var bind = require('bind-component');
+  var type = require('type-component');
 }
 
-var bindAll = require('bind-all');
-
-
-/**
- * Expose `bind`.
- */
-
-module.exports = exports = bind;
-
-
-/**
- * Expose `bindAll`.
- */
-
-exports.all = bindAll;
-
-
-/**
- * Expose `bindMethods`.
- */
-
-exports.methods = bindMethods;
-
-
-/**
- * Bind `methods` on `obj` to always be called with the `obj` as context.
- *
- * @param {Object} obj
- * @param {String} methods...
- */
-
-function bindMethods (obj, methods) {
-  methods = [].slice.call(arguments, 1);
-  for (var i = 0, method; method = methods[i]; i++) {
-    obj[method] = bind(obj, obj[method]);
+module.exports = function (obj) {
+  for (var key in obj) {
+    var val = obj[key];
+    if (type(val) === 'function') obj[key] = bind(obj, obj[key]);
   }
   return obj;
-}
-}, {"bind":56,"bind-all":57}],
+};
+}, {"bind":56,"type":48}],
 56: [function(require, module, exports) {
 /**
  * Slice reference.
@@ -3312,24 +3342,6 @@ module.exports = function(obj, fn){
 };
 
 }, {}],
-57: [function(require, module, exports) {
-
-try {
-  var bind = require('bind');
-  var type = require('type');
-} catch (e) {
-  var bind = require('bind-component');
-  var type = require('type-component');
-}
-
-module.exports = function (obj) {
-  for (var key in obj) {
-    var val = obj[key];
-    if (type(val) === 'function') obj[key] = bind(obj, obj[key]);
-  }
-  return obj;
-};
-}, {"bind":56,"type":48}],
 12: [function(require, module, exports) {
 var next = require('next-tick');
 
@@ -3373,8 +3385,8 @@ callback.async = function (fn, wait) {
 
 callback.sync = callback;
 
-}, {"next-tick":58}],
-58: [function(require, module, exports) {
+}, {"next-tick":57}],
+57: [function(require, module, exports) {
 "use strict"
 
 if (typeof setImmediate == 'function') {
@@ -3478,7 +3490,7 @@ function clone(obj){
  * Module dependencies.
  */
 
-var bind = require('bind');
+var bindAll = require('bind-all');
 var clone = require('clone');
 var cookie = require('cookie');
 var debug = require('debug')('analytics.js:cookie');
@@ -3597,7 +3609,7 @@ Cookie.prototype.remove = function(key) {
  * Expose the cookie singleton.
  */
 
-module.exports = bind.all(new Cookie());
+module.exports = bindAll(new Cookie());
 
 
 /**
@@ -3606,8 +3618,8 @@ module.exports = bind.all(new Cookie());
 
 module.exports.Cookie = Cookie;
 
-}, {"bind":11,"clone":13,"cookie":59,"debug":15,"defaults":16,"json":60,"top-domain":61}],
-59: [function(require, module, exports) {
+}, {"bind-all":11,"clone":13,"cookie":58,"debug":15,"defaults":16,"json":59,"top-domain":60}],
+58: [function(require, module, exports) {
 
 /**
  * Module dependencies.
@@ -3739,8 +3751,8 @@ if ('undefined' == typeof window) {
   module.exports = require('./debug');
 }
 
-}, {"./lib/debug":62,"./debug":63}],
-62: [function(require, module, exports) {
+}, {"./lib/debug":61,"./debug":62}],
+61: [function(require, module, exports) {
 /**
  * Module dependencies.
  */
@@ -3890,7 +3902,7 @@ function coerce(val) {
 }
 
 }, {}],
-63: [function(require, module, exports) {
+62: [function(require, module, exports) {
 
 /**
  * Expose `debug()` as the module.
@@ -4059,7 +4071,7 @@ var defaults = function (dest, src, recursive) {
 module.exports = defaults;
 
 }, {}],
-60: [function(require, module, exports) {
+59: [function(require, module, exports) {
 
 var json = window.JSON || {};
 var stringify = json.stringify;
@@ -4069,8 +4081,8 @@ module.exports = parse && stringify
   ? JSON
   : require('json-fallback');
 
-}, {"json-fallback":64}],
-64: [function(require, module, exports) {
+}, {"json-fallback":63}],
+63: [function(require, module, exports) {
 /*
     json2.js
     2014-02-04
@@ -4560,7 +4572,7 @@ module.exports = parse && stringify
 }());
 
 }, {}],
-61: [function(require, module, exports) {
+60: [function(require, module, exports) {
 
 /**
  * Module dependencies.
@@ -4664,8 +4676,8 @@ domain.levels = function(url){
   return levels;
 };
 
-}, {"url":65,"cookie":66}],
-65: [function(require, module, exports) {
+}, {"url":64,"cookie":65}],
+64: [function(require, module, exports) {
 
 /**
  * Parse the given `url`.
@@ -4750,7 +4762,7 @@ function port (protocol){
 }
 
 }, {}],
-66: [function(require, module, exports) {
+65: [function(require, module, exports) {
 
 /**
  * Module dependencies.
@@ -4942,8 +4954,8 @@ var foldl = function foldl(iterator, accumulator, collection) {
 
 module.exports = foldl;
 
-}, {"each":67}],
-67: [function(require, module, exports) {
+}, {"each":66}],
+66: [function(require, module, exports) {
 'use strict';
 
 /**
@@ -5085,8 +5097,8 @@ var each = function each(iterator, collection) {
 
 module.exports = each;
 
-}, {"keys":68}],
-68: [function(require, module, exports) {
+}, {"keys":67}],
+67: [function(require, module, exports) {
 'use strict';
 
 /**
@@ -5273,7 +5285,7 @@ module.exports = function keys(source) {
  */
 
 var Entity = require('./entity');
-var bind = require('bind');
+var bindAll = require('bind-all');
 var debug = require('debug')('analytics:group');
 var inherit = require('inherit');
 
@@ -5316,7 +5328,7 @@ inherit(Group, Entity);
  * Expose the group singleton.
  */
 
-module.exports = bind.all(new Group());
+module.exports = bindAll(new Group());
 
 
 /**
@@ -5325,8 +5337,8 @@ module.exports = bind.all(new Group());
 
 module.exports.Group = Group;
 
-}, {"./entity":69,"bind":11,"debug":15,"inherit":70}],
-69: [function(require, module, exports) {
+}, {"./entity":68,"bind-all":11,"debug":15,"inherit":69}],
+68: [function(require, module, exports) {
 
 var clone = require('clone');
 var cookie = require('./cookie');
@@ -5565,8 +5577,8 @@ Entity.prototype.load = function() {
 };
 
 
-}, {"clone":13,"./cookie":14,"debug":15,"defaults":16,"extend":71,"./memory":22,"./store":29,"isodate-traverse":39}],
-71: [function(require, module, exports) {
+}, {"clone":13,"./cookie":14,"debug":15,"defaults":16,"extend":70,"./memory":22,"./store":29,"isodate-traverse":39}],
+70: [function(require, module, exports) {
 
 module.exports = function extend (object) {
     // Takes an unlimited number of extenders.
@@ -5590,7 +5602,7 @@ module.exports = function extend (object) {
  * Module Dependencies.
  */
 
-var bind = require('bind');
+var bindAll = require('bind-all');
 var clone = require('clone');
 
 /**
@@ -5603,7 +5615,7 @@ var has = Object.prototype.hasOwnProperty;
  * Expose `Memory`
  */
 
-module.exports = bind.all(new Memory());
+module.exports = bindAll(new Memory());
 
 /**
  * Initialize `Memory` store
@@ -5649,14 +5661,14 @@ Memory.prototype.remove = function(key){
   return true;
 };
 
-}, {"bind":11,"clone":13}],
+}, {"bind-all":11,"clone":13}],
 29: [function(require, module, exports) {
 
 /**
  * Module dependencies.
  */
 
-var bind = require('bind');
+var bindAll = require('bind-all');
 var defaults = require('defaults');
 var store = require('store.js');
 
@@ -5730,7 +5742,7 @@ Store.prototype.remove = function(key) {
  * Expose the store singleton.
  */
 
-module.exports = bind.all(new Store());
+module.exports = bindAll(new Store());
 
 
 /**
@@ -5739,8 +5751,8 @@ module.exports = bind.all(new Store());
 
 module.exports.Store = Store;
 
-}, {"bind":11,"defaults":16,"store.js":72}],
-72: [function(require, module, exports) {
+}, {"bind-all":11,"defaults":16,"store.js":71}],
+71: [function(require, module, exports) {
 var json             = require('json')
   , store            = {}
   , win              = window
@@ -5892,8 +5904,8 @@ try {
 store.enabled = !store.disabled
 
 module.exports = store;
-}, {"json":60}],
-70: [function(require, module, exports) {
+}, {"json":59}],
+69: [function(require, module, exports) {
 
 module.exports = function(a, b){
   var fn = function(){};
@@ -6173,8 +6185,8 @@ function normalize(msg, list){
   }
 }
 
-}, {"debug":15,"defaults":16,"each":4,"includes":73,"is":19,"component/map":74}],
-73: [function(require, module, exports) {
+}, {"debug":15,"defaults":16,"each":4,"includes":72,"is":19,"component/map":73}],
+72: [function(require, module, exports) {
 'use strict';
 
 /**
@@ -6264,8 +6276,8 @@ var includes = function includes(searchElement, collection) {
 
 module.exports = includes;
 
-}, {"each":67}],
-74: [function(require, module, exports) {
+}, {"each":66}],
+73: [function(require, module, exports) {
 
 /**
  * Module dependencies.
@@ -6290,8 +6302,8 @@ module.exports = function(arr, fn){
   }
   return ret;
 };
-}, {"to-function":75}],
-75: [function(require, module, exports) {
+}, {"to-function":74}],
+74: [function(require, module, exports) {
 
 /**
  * Module Dependencies
@@ -6445,8 +6457,8 @@ function stripNested (prop, str, val) {
   });
 }
 
-}, {"props":76,"component-props":76}],
-76: [function(require, module, exports) {
+}, {"props":75,"component-props":75}],
+75: [function(require, module, exports) {
 /**
  * Global Names
  */
@@ -6640,8 +6652,8 @@ function canonicalUrl(search) {
 
 module.exports = pageDefaults;
 
-}, {"canonical":77,"includes":73,"url":78}],
-77: [function(require, module, exports) {
+}, {"canonical":76,"includes":72,"url":77}],
+76: [function(require, module, exports) {
 module.exports = function canonical () {
   var tags = document.getElementsByTagName('link');
   for (var i = 0, tag; tag = tags[i]; i++) {
@@ -6649,7 +6661,7 @@ module.exports = function canonical () {
   }
 };
 }, {}],
-78: [function(require, module, exports) {
+77: [function(require, module, exports) {
 
 /**
  * Parse the given `url`.
@@ -6940,8 +6952,8 @@ exports.stringify = function(obj){
   return pairs.join('&');
 };
 
-}, {"trim":55,"type":79}],
-79: [function(require, module, exports) {
+}, {"trim":55,"type":78}],
+78: [function(require, module, exports) {
 /**
  * toString ref.
  */
@@ -6985,7 +6997,7 @@ module.exports = function(val){
  */
 
 var Entity = require('./entity');
-var bind = require('bind');
+var bindAll = require('bind-all');
 var cookie = require('./cookie');
 var debug = require('debug')('analytics:user');
 var inherit = require('inherit');
@@ -7147,7 +7159,7 @@ User.prototype._loadOldCookie = function() {
  * Expose the user singleton.
  */
 
-module.exports = bind.all(new User());
+module.exports = bindAll(new User());
 
 
 /**
@@ -7156,8 +7168,8 @@ module.exports = bind.all(new User());
 
 module.exports.User = User;
 
-}, {"./entity":69,"bind":11,"./cookie":14,"debug":15,"inherit":70,"cookie":59,"uuid":80}],
-80: [function(require, module, exports) {
+}, {"./entity":68,"bind-all":11,"./cookie":14,"debug":15,"inherit":69,"cookie":58,"uuid":79}],
+79: [function(require, module, exports) {
 
 /**
  * Taken straight from jed's gist: https://gist.github.com/982883
@@ -7215,8 +7227,8 @@ module.exports = {
   'segmentio': require('analytics.js-integration-segmentio')
 };
 
-}, {"analytics.js-integration-amplitude":81,"analytics.js-integration-chartbeat":82,"analytics.js-integration-comscore":83,"analytics.js-integration-google-analytics":84,"analytics.js-integration-hubspot":85,"analytics.js-integration-intercom":86,"analytics.js-integration-keen-io":87,"analytics.js-integration-kissmetrics":88,"analytics.js-integration-mixpanel":89,"analytics.js-integration-quantcast":90,"analytics.js-integration-segmentio":91}],
-81: [function(require, module, exports) {
+}, {"analytics.js-integration-amplitude":80,"analytics.js-integration-chartbeat":81,"analytics.js-integration-comscore":82,"analytics.js-integration-google-analytics":83,"analytics.js-integration-hubspot":84,"analytics.js-integration-intercom":85,"analytics.js-integration-keen-io":86,"analytics.js-integration-kissmetrics":87,"analytics.js-integration-mixpanel":88,"analytics.js-integration-quantcast":89,"analytics.js-integration-segmentio":90}],
+80: [function(require, module, exports) {
 
 /**
  * Module dependencies.
@@ -7379,8 +7391,8 @@ Amplitude.prototype.setDeviceId = function(deviceId) {
   if (deviceId) window.amplitude.setDeviceId(deviceId);
 };
 
-}, {"analytics.js-integration":92,"top-domain":93}],
-92: [function(require, module, exports) {
+}, {"analytics.js-integration":91,"top-domain":92}],
+91: [function(require, module, exports) {
 
 /**
  * Module dependencies.
@@ -7444,8 +7456,8 @@ function createIntegration(name){
 
 module.exports = createIntegration;
 
-}, {"bind":94,"clone":13,"debug":95,"defaults":16,"extend":96,"slug":97,"./protos":98,"./statics":99}],
-94: [function(require, module, exports) {
+}, {"bind":93,"clone":13,"debug":94,"defaults":16,"extend":95,"slug":96,"./protos":97,"./statics":98}],
+93: [function(require, module, exports) {
 
 var bind = require('bind')
   , bindAll = require('bind-all');
@@ -7486,16 +7498,16 @@ function bindMethods (obj, methods) {
   }
   return obj;
 }
-}, {"bind":56,"bind-all":57}],
-95: [function(require, module, exports) {
+}, {"bind":56}],
+94: [function(require, module, exports) {
 if ('undefined' == typeof window) {
   module.exports = require('./lib/debug');
 } else {
   module.exports = require('./debug');
 }
 
-}, {"./lib/debug":100,"./debug":101}],
-100: [function(require, module, exports) {
+}, {"./lib/debug":99,"./debug":100}],
+99: [function(require, module, exports) {
 /**
  * Module dependencies.
  */
@@ -7645,7 +7657,7 @@ function coerce(val) {
 }
 
 }, {}],
-101: [function(require, module, exports) {
+100: [function(require, module, exports) {
 
 /**
  * Expose `debug()` as the module.
@@ -7785,7 +7797,7 @@ try {
 } catch(e){}
 
 }, {}],
-96: [function(require, module, exports) {
+95: [function(require, module, exports) {
 
 module.exports = function extend (object) {
     // Takes an unlimited number of extenders.
@@ -7802,7 +7814,7 @@ module.exports = function extend (object) {
     return object;
 };
 }, {}],
-97: [function(require, module, exports) {
+96: [function(require, module, exports) {
 
 /**
  * Generate a slug from the given `str`.
@@ -7828,7 +7840,7 @@ module.exports = function (str, options) {
 };
 
 }, {}],
-98: [function(require, module, exports) {
+97: [function(require, module, exports) {
 /* global setInterval:true setTimeout:true */
 
 /**
@@ -8254,8 +8266,8 @@ function render(template, locals){
   }, {}, template.attrs);
 }
 
-}, {"emitter":8,"after":10,"each":102,"analytics-events":103,"fmt":104,"foldl":17,"load-iframe":105,"load-script":106,"to-no-case":107,"next-tick":58,"type":108}],
-102: [function(require, module, exports) {
+}, {"emitter":8,"after":10,"each":101,"analytics-events":102,"fmt":103,"foldl":17,"load-iframe":104,"load-script":105,"to-no-case":106,"next-tick":57,"type":107}],
+101: [function(require, module, exports) {
 
 /**
  * Module dependencies.
@@ -8346,8 +8358,8 @@ function array(obj, fn, ctx) {
   }
 }
 
-}, {"type":108,"component-type":108,"to-function":75}],
-108: [function(require, module, exports) {
+}, {"type":107,"component-type":107,"to-function":74}],
+107: [function(require, module, exports) {
 
 /**
  * toString ref.
@@ -8382,7 +8394,7 @@ module.exports = function(val){
 };
 
 }, {}],
-103: [function(require, module, exports) {
+102: [function(require, module, exports) {
 
 module.exports = {
   removedProduct: /^[ _]?removed[ _]?product[ _]?$/i,
@@ -8402,7 +8414,7 @@ module.exports = {
 };
 
 }, {}],
-104: [function(require, module, exports) {
+103: [function(require, module, exports) {
 
 /**
  * toString.
@@ -8447,7 +8459,7 @@ function fmt(str){
 }
 
 }, {}],
-105: [function(require, module, exports) {
+104: [function(require, module, exports) {
 
 /**
  * Module dependencies.
@@ -8509,8 +8521,8 @@ module.exports = function loadIframe(options, fn){
   // give it an ID or attributes.
   return iframe;
 };
-}, {"script-onload":109,"next-tick":58,"type":48}],
-109: [function(require, module, exports) {
+}, {"script-onload":108,"next-tick":57,"type":48}],
+108: [function(require, module, exports) {
 
 // https://github.com/thirdpartyjs/thirdpartyjs-code/blob/master/examples/templates/02/loading-files/index.html
 
@@ -8566,7 +8578,7 @@ function attach(el, fn){
 }
 
 }, {}],
-106: [function(require, module, exports) {
+105: [function(require, module, exports) {
 
 /**
  * Module dependencies.
@@ -8627,8 +8639,8 @@ module.exports = function loadScript(options, fn){
   // give it an ID or attributes.
   return script;
 };
-}, {"script-onload":109,"next-tick":58,"type":48}],
-107: [function(require, module, exports) {
+}, {"script-onload":108,"next-tick":57,"type":48}],
+106: [function(require, module, exports) {
 
 /**
  * Expose `toNoCase`.
@@ -8701,7 +8713,7 @@ function uncamelize (string) {
   });
 }
 }, {}],
-99: [function(require, module, exports) {
+98: [function(require, module, exports) {
 
 /**
  * Module dependencies.
@@ -8865,8 +8877,8 @@ function objectify(str) {
   };
 }
 
-}, {"emitter":8,"domify":110,"each":102,"includes":73}],
-110: [function(require, module, exports) {
+}, {"emitter":8,"domify":109,"each":101,"includes":72}],
+109: [function(require, module, exports) {
 
 /**
  * Expose `parse`.
@@ -8977,7 +8989,7 @@ function parse(html, doc) {
 }
 
 }, {}],
-93: [function(require, module, exports) {
+92: [function(require, module, exports) {
 
 /**
  * Module dependencies.
@@ -9025,8 +9037,8 @@ function domain(url){
   return match ? match[0] : '';
 };
 
-}, {"url":65}],
-82: [function(require, module, exports) {
+}, {"url":64}],
+81: [function(require, module, exports) {
 
 /**
  * Module dependencies.
@@ -9102,8 +9114,8 @@ Chartbeat.prototype.page = function(page) {
   window.pSUPERFLY.virtualPage(props.path, name || props.title);
 };
 
-}, {"defaults":111,"analytics.js-integration":92,"on-body":112}],
-111: [function(require, module, exports) {
+}, {"defaults":110,"analytics.js-integration":91,"on-body":111}],
+110: [function(require, module, exports) {
 /**
  * Expose `defaults`.
  */
@@ -9120,7 +9132,7 @@ function defaults (dest, defaults) {
 };
 
 }, {}],
-112: [function(require, module, exports) {
+111: [function(require, module, exports) {
 var each = require('each');
 
 
@@ -9174,8 +9186,8 @@ var interval = setInterval(function () {
 function call (callback) {
   callback(document.body);
 }
-}, {"each":102}],
-83: [function(require, module, exports) {
+}, {"each":101}],
+82: [function(require, module, exports) {
 
 /**
  * Module dependencies.
@@ -9231,8 +9243,8 @@ Comscore.prototype.page = function() {
   window.COMSCORE.beacon(this.options);
 };
 
-}, {"analytics.js-integration":92,"use-https":113}],
-113: [function(require, module, exports) {
+}, {"analytics.js-integration":91,"use-https":112}],
+112: [function(require, module, exports) {
 
 /**
  * Protocol.
@@ -9271,7 +9283,7 @@ function check () {
   );
 }
 }, {}],
-84: [function(require, module, exports) {
+83: [function(require, module, exports) {
 
 /**
  * Module dependencies.
@@ -10159,7 +10171,1379 @@ function createProductTrack(track, properties) {
   return new Track({ properties: properties });
 }
 
-}, {"facade":9,"defaults":111,"obj-case":43,"each":4,"analytics.js-integration":92,"is":19,"object":21,"global-queue":114,"select":115,"use-https":113}],
+}, {"facade":113,"defaults":110,"obj-case":43,"each":4,"analytics.js-integration":91,"is":19,"object":21,"global-queue":114,"select":115,"use-https":112}],
+113: [function(require, module, exports) {
+
+var Facade = require('./facade');
+
+/**
+ * Expose `Facade` facade.
+ */
+
+module.exports = Facade;
+
+/**
+ * Expose specific-method facades.
+ */
+
+Facade.Alias = require('./alias');
+Facade.Group = require('./group');
+Facade.Identify = require('./identify');
+Facade.Track = require('./track');
+Facade.Page = require('./page');
+Facade.Screen = require('./screen');
+
+}, {"./facade":116,"./alias":117,"./group":118,"./identify":119,"./track":120,"./page":121,"./screen":122}],
+116: [function(require, module, exports) {
+
+var traverse = require('isodate-traverse');
+var isEnabled = require('./is-enabled');
+var clone = require('./utils').clone;
+var type = require('./utils').type;
+var address = require('./address');
+var objCase = require('obj-case');
+var newDate = require('new-date');
+
+/**
+ * Expose `Facade`.
+ */
+
+module.exports = Facade;
+
+/**
+ * Initialize a new `Facade` with an `obj` of arguments.
+ *
+ * @param {Object} obj
+ */
+
+function Facade (obj) {
+  obj = clone(obj);
+  if (!obj.hasOwnProperty('timestamp')) obj.timestamp = new Date();
+  else obj.timestamp = newDate(obj.timestamp);
+  traverse(obj);
+  this.obj = obj;
+}
+
+/**
+ * Mixin address traits.
+ */
+
+address(Facade.prototype);
+
+/**
+ * Return a proxy function for a `field` that will attempt to first use methods,
+ * and fallback to accessing the underlying object directly. You can specify
+ * deeply nested fields too like:
+ *
+ *   this.proxy('options.Librato');
+ *
+ * @param {String} field
+ */
+
+Facade.prototype.proxy = function (field) {
+  var fields = field.split('.');
+  field = fields.shift();
+
+  // Call a function at the beginning to take advantage of facaded fields
+  var obj = this[field] || this.field(field);
+  if (!obj) return obj;
+  if (typeof obj === 'function') obj = obj.call(this) || {};
+  if (fields.length === 0) return transform(obj);
+
+  obj = objCase(obj, fields.join('.'));
+  return transform(obj);
+};
+
+/**
+ * Directly access a specific `field` from the underlying object, returning a
+ * clone so outsiders don't mess with stuff.
+ *
+ * @param {String} field
+ * @return {Mixed}
+ */
+
+Facade.prototype.field = function (field) {
+  var obj = this.obj[field];
+  return transform(obj);
+};
+
+/**
+ * Utility method to always proxy a particular `field`. You can specify deeply
+ * nested fields too like:
+ *
+ *   Facade.proxy('options.Librato');
+ *
+ * @param {String} field
+ * @return {Function}
+ */
+
+Facade.proxy = function (field) {
+  return function () {
+    return this.proxy(field);
+  };
+};
+
+/**
+ * Utility method to directly access a `field`.
+ *
+ * @param {String} field
+ * @return {Function}
+ */
+
+Facade.field = function (field) {
+  return function () {
+    return this.field(field);
+  };
+};
+
+/**
+ * Proxy multiple `path`.
+ *
+ * @param {String} path
+ * @return {Array}
+ */
+
+Facade.multi = function(path){
+  return function(){
+    var multi = this.proxy(path + 's');
+    if ('array' == type(multi)) return multi;
+    var one = this.proxy(path);
+    if (one) one = [clone(one)];
+    return one || [];
+  };
+};
+
+/**
+ * Proxy one `path`.
+ *
+ * @param {String} path
+ * @return {Mixed}
+ */
+
+Facade.one = function(path){
+  return function(){
+    var one = this.proxy(path);
+    if (one) return one;
+    var multi = this.proxy(path + 's');
+    if ('array' == type(multi)) return multi[0];
+  };
+};
+
+/**
+ * Get the basic json object of this facade.
+ *
+ * @return {Object}
+ */
+
+Facade.prototype.json = function () {
+  var ret = clone(this.obj);
+  if (this.type) ret.type = this.type();
+  return ret;
+};
+
+/**
+ * Get the options of a call (formerly called "context"). If you pass an
+ * integration name, it will get the options for that specific integration, or
+ * undefined if the integration is not enabled.
+ *
+ * @param {String} integration (optional)
+ * @return {Object or Null}
+ */
+
+Facade.prototype.context =
+Facade.prototype.options = function (integration) {
+  var options = clone(this.obj.options || this.obj.context) || {};
+  if (!integration) return clone(options);
+  if (!this.enabled(integration)) return;
+  var integrations = this.integrations();
+  var value = integrations[integration] || objCase(integrations, integration);
+  if ('boolean' == typeof value) value = {};
+  return value || {};
+};
+
+/**
+ * Check whether an integration is enabled.
+ *
+ * @param {String} integration
+ * @return {Boolean}
+ */
+
+Facade.prototype.enabled = function (integration) {
+  var allEnabled = this.proxy('options.providers.all');
+  if (typeof allEnabled !== 'boolean') allEnabled = this.proxy('options.all');
+  if (typeof allEnabled !== 'boolean') allEnabled = this.proxy('integrations.all');
+  if (typeof allEnabled !== 'boolean') allEnabled = true;
+
+  var enabled = allEnabled && isEnabled(integration);
+  var options = this.integrations();
+
+  // If the integration is explicitly enabled or disabled, use that
+  // First, check options.providers for backwards compatibility
+  if (options.providers && options.providers.hasOwnProperty(integration)) {
+    enabled = options.providers[integration];
+  }
+
+  // Next, check for the integration's existence in 'options' to enable it.
+  // If the settings are a boolean, use that, otherwise it should be enabled.
+  if (options.hasOwnProperty(integration)) {
+    var settings = options[integration];
+    if (typeof settings === 'boolean') {
+      enabled = settings;
+    } else {
+      enabled = true;
+    }
+  }
+
+  return enabled ? true : false;
+};
+
+/**
+ * Get all `integration` options.
+ *
+ * @param {String} integration
+ * @return {Object}
+ * @api private
+ */
+
+Facade.prototype.integrations = function(){
+  return this.obj.integrations
+    || this.proxy('options.providers')
+    || this.options();
+};
+
+/**
+ * Check whether the user is active.
+ *
+ * @return {Boolean}
+ */
+
+Facade.prototype.active = function () {
+  var active = this.proxy('options.active');
+  if (active === null || active === undefined) active = true;
+  return active;
+};
+
+/**
+ * Get `sessionId / anonymousId`.
+ *
+ * @return {Mixed}
+ * @api public
+ */
+
+Facade.prototype.sessionId =
+Facade.prototype.anonymousId = function(){
+  return this.field('anonymousId')
+    || this.field('sessionId');
+};
+
+/**
+ * Get `groupId` from `context.groupId`.
+ *
+ * @return {String}
+ * @api public
+ */
+
+Facade.prototype.groupId = Facade.proxy('options.groupId');
+
+/**
+ * Get the call's "super properties" which are just traits that have been
+ * passed in as if from an identify call.
+ *
+ * @param {Object} aliases
+ * @return {Object}
+ */
+
+Facade.prototype.traits = function (aliases) {
+  var ret = this.proxy('options.traits') || {};
+  var id = this.userId();
+  aliases = aliases || {};
+
+  if (id) ret.id = id;
+
+  for (var alias in aliases) {
+    var value = null == this[alias]
+      ? this.proxy('options.traits.' + alias)
+      : this[alias]();
+    if (null == value) continue;
+    ret[aliases[alias]] = value;
+    delete ret[alias];
+  }
+
+  return ret;
+};
+
+/**
+ * Add a convenient way to get the library name and version
+ */
+
+Facade.prototype.library = function(){
+  var library = this.proxy('options.library');
+  if (!library) return { name: 'unknown', version: null };
+  if (typeof library === 'string') return { name: library, version: null };
+  return library;
+};
+
+/**
+ * Setup some basic proxies.
+ */
+
+Facade.prototype.userId = Facade.field('userId');
+Facade.prototype.channel = Facade.field('channel');
+Facade.prototype.timestamp = Facade.field('timestamp');
+Facade.prototype.userAgent = Facade.proxy('options.userAgent');
+Facade.prototype.ip = Facade.proxy('options.ip');
+
+/**
+ * Return the cloned and traversed object
+ *
+ * @param {Mixed} obj
+ * @return {Mixed}
+ */
+
+function transform(obj){
+  var cloned = clone(obj);
+  return cloned;
+}
+
+}, {"isodate-traverse":39,"./is-enabled":123,"./utils":124,"./address":125,"obj-case":43,"new-date":44}],
+123: [function(require, module, exports) {
+
+/**
+ * A few integrations are disabled by default. They must be explicitly
+ * enabled by setting options[Provider] = true.
+ */
+
+var disabled = {
+  Salesforce: true
+};
+
+/**
+ * Check whether an integration should be enabled by default.
+ *
+ * @param {String} integration
+ * @return {Boolean}
+ */
+
+module.exports = function (integration) {
+  return ! disabled[integration];
+};
+}, {}],
+124: [function(require, module, exports) {
+
+/**
+ * TODO: use component symlink, everywhere ?
+ */
+
+try {
+  exports.inherit = require('inherit');
+  exports.clone = require('clone');
+  exports.type = require('type');
+} catch (e) {
+  exports.inherit = require('inherit-component');
+  exports.clone = require('clone-component');
+  exports.type = require('type-component');
+}
+
+}, {"inherit":49,"clone":50,"type":48}],
+125: [function(require, module, exports) {
+
+/**
+ * Module dependencies.
+ */
+
+var get = require('obj-case');
+
+/**
+ * Add address getters to `proto`.
+ *
+ * @param {Function} proto
+ */
+
+module.exports = function(proto){
+  proto.zip = trait('postalCode', 'zip');
+  proto.country = trait('country');
+  proto.street = trait('street');
+  proto.state = trait('state');
+  proto.city = trait('city');
+
+  function trait(a, b){
+    return function(){
+      var traits = this.traits();
+      var props = this.properties ? this.properties() : {};
+
+      return get(traits, 'address.' + a)
+        || get(traits, a)
+        || (b ? get(traits, 'address.' + b) : null)
+        || (b ? get(traits, b) : null)
+        || get(props, 'address.' + a)
+        || get(props, a)
+        || (b ? get(props, 'address.' + b) : null)
+        || (b ? get(props, b) : null);
+    };
+  }
+};
+
+}, {"obj-case":43}],
+117: [function(require, module, exports) {
+
+/**
+ * Module dependencies.
+ */
+
+var inherit = require('./utils').inherit;
+var Facade = require('./facade');
+
+/**
+ * Expose `Alias` facade.
+ */
+
+module.exports = Alias;
+
+/**
+ * Initialize a new `Alias` facade with a `dictionary` of arguments.
+ *
+ * @param {Object} dictionary
+ *   @property {String} from
+ *   @property {String} to
+ *   @property {Object} options
+ */
+
+function Alias (dictionary) {
+  Facade.call(this, dictionary);
+}
+
+/**
+ * Inherit from `Facade`.
+ */
+
+inherit(Alias, Facade);
+
+/**
+ * Return type of facade.
+ *
+ * @return {String}
+ */
+
+Alias.prototype.type =
+Alias.prototype.action = function () {
+  return 'alias';
+};
+
+/**
+ * Get `previousId`.
+ *
+ * @return {Mixed}
+ * @api public
+ */
+
+Alias.prototype.from =
+Alias.prototype.previousId = function(){
+  return this.field('previousId')
+    || this.field('from');
+};
+
+/**
+ * Get `userId`.
+ *
+ * @return {String}
+ * @api public
+ */
+
+Alias.prototype.to =
+Alias.prototype.userId = function(){
+  return this.field('userId')
+    || this.field('to');
+};
+
+}, {"./utils":124,"./facade":116}],
+118: [function(require, module, exports) {
+
+/**
+ * Module dependencies.
+ */
+
+var inherit = require('./utils').inherit;
+var address = require('./address');
+var isEmail = require('is-email');
+var newDate = require('new-date');
+var Facade = require('./facade');
+
+/**
+ * Expose `Group` facade.
+ */
+
+module.exports = Group;
+
+/**
+ * Initialize a new `Group` facade with a `dictionary` of arguments.
+ *
+ * @param {Object} dictionary
+ *   @param {String} userId
+ *   @param {String} groupId
+ *   @param {Object} properties
+ *   @param {Object} options
+ */
+
+function Group (dictionary) {
+  Facade.call(this, dictionary);
+}
+
+/**
+ * Inherit from `Facade`
+ */
+
+inherit(Group, Facade);
+
+/**
+ * Get the facade's action.
+ */
+
+Group.prototype.type =
+Group.prototype.action = function () {
+  return 'group';
+};
+
+/**
+ * Setup some basic proxies.
+ */
+
+Group.prototype.groupId = Facade.field('groupId');
+
+/**
+ * Get created or createdAt.
+ *
+ * @return {Date}
+ */
+
+Group.prototype.created = function(){
+  var created = this.proxy('traits.createdAt')
+    || this.proxy('traits.created')
+    || this.proxy('properties.createdAt')
+    || this.proxy('properties.created');
+
+  if (created) return newDate(created);
+};
+
+/**
+ * Get the group's email, falling back to the group ID if it's a valid email.
+ *
+ * @return {String}
+ */
+
+Group.prototype.email = function () {
+  var email = this.proxy('traits.email');
+  if (email) return email;
+  var groupId = this.groupId();
+  if (isEmail(groupId)) return groupId;
+};
+
+/**
+ * Get the group's traits.
+ *
+ * @param {Object} aliases
+ * @return {Object}
+ */
+
+Group.prototype.traits = function (aliases) {
+  var ret = this.properties();
+  var id = this.groupId();
+  aliases = aliases || {};
+
+  if (id) ret.id = id;
+
+  for (var alias in aliases) {
+    var value = null == this[alias]
+      ? this.proxy('traits.' + alias)
+      : this[alias]();
+    if (null == value) continue;
+    ret[aliases[alias]] = value;
+    delete ret[alias];
+  }
+
+  return ret;
+};
+
+/**
+ * Special traits.
+ */
+
+Group.prototype.name = Facade.proxy('traits.name');
+Group.prototype.industry = Facade.proxy('traits.industry');
+Group.prototype.employees = Facade.proxy('traits.employees');
+
+/**
+ * Get traits or properties.
+ *
+ * TODO: remove me
+ *
+ * @return {Object}
+ */
+
+Group.prototype.properties = function(){
+  return this.field('traits')
+    || this.field('properties')
+    || {};
+};
+
+}, {"./utils":124,"./address":125,"is-email":54,"new-date":44,"./facade":116}],
+119: [function(require, module, exports) {
+
+var address = require('./address');
+var Facade = require('./facade');
+var isEmail = require('is-email');
+var newDate = require('new-date');
+var utils = require('./utils');
+var get = require('obj-case');
+var trim = require('trim');
+var inherit = utils.inherit;
+var clone = utils.clone;
+var type = utils.type;
+
+/**
+ * Expose `Idenfity` facade.
+ */
+
+module.exports = Identify;
+
+/**
+ * Initialize a new `Identify` facade with a `dictionary` of arguments.
+ *
+ * @param {Object} dictionary
+ *   @param {String} userId
+ *   @param {String} sessionId
+ *   @param {Object} traits
+ *   @param {Object} options
+ */
+
+function Identify (dictionary) {
+  Facade.call(this, dictionary);
+}
+
+/**
+ * Inherit from `Facade`.
+ */
+
+inherit(Identify, Facade);
+
+/**
+ * Get the facade's action.
+ */
+
+Identify.prototype.type =
+Identify.prototype.action = function () {
+  return 'identify';
+};
+
+/**
+ * Get the user's traits.
+ *
+ * @param {Object} aliases
+ * @return {Object}
+ */
+
+Identify.prototype.traits = function (aliases) {
+  var ret = this.field('traits') || {};
+  var id = this.userId();
+  aliases = aliases || {};
+
+  if (id) ret.id = id;
+
+  for (var alias in aliases) {
+    var value = null == this[alias]
+      ? this.proxy('traits.' + alias)
+      : this[alias]();
+    if (null == value) continue;
+    ret[aliases[alias]] = value;
+    if (alias !== aliases[alias]) delete ret[alias];
+  }
+
+  return ret;
+};
+
+/**
+ * Get the user's email, falling back to their user ID if it's a valid email.
+ *
+ * @return {String}
+ */
+
+Identify.prototype.email = function () {
+  var email = this.proxy('traits.email');
+  if (email) return email;
+
+  var userId = this.userId();
+  if (isEmail(userId)) return userId;
+};
+
+/**
+ * Get the user's created date, optionally looking for `createdAt` since lots of
+ * people do that instead.
+ *
+ * @return {Date or Undefined}
+ */
+
+Identify.prototype.created = function () {
+  var created = this.proxy('traits.created') || this.proxy('traits.createdAt');
+  if (created) return newDate(created);
+};
+
+/**
+ * Get the company created date.
+ *
+ * @return {Date or undefined}
+ */
+
+Identify.prototype.companyCreated = function(){
+  var created = this.proxy('traits.company.created')
+    || this.proxy('traits.company.createdAt');
+
+  if (created) return newDate(created);
+};
+
+/**
+ * Get the user's name, optionally combining a first and last name if that's all
+ * that was provided.
+ *
+ * @return {String or Undefined}
+ */
+
+Identify.prototype.name = function () {
+  var name = this.proxy('traits.name');
+  if (typeof name === 'string') return trim(name);
+
+  var firstName = this.firstName();
+  var lastName = this.lastName();
+  if (firstName && lastName) return trim(firstName + ' ' + lastName);
+};
+
+/**
+ * Get the user's first name, optionally splitting it out of a single name if
+ * that's all that was provided.
+ *
+ * @return {String or Undefined}
+ */
+
+Identify.prototype.firstName = function () {
+  var firstName = this.proxy('traits.firstName');
+  if (typeof firstName === 'string') return trim(firstName);
+
+  var name = this.proxy('traits.name');
+  if (typeof name === 'string') return trim(name).split(' ')[0];
+};
+
+/**
+ * Get the user's last name, optionally splitting it out of a single name if
+ * that's all that was provided.
+ *
+ * @return {String or Undefined}
+ */
+
+Identify.prototype.lastName = function () {
+  var lastName = this.proxy('traits.lastName');
+  if (typeof lastName === 'string') return trim(lastName);
+
+  var name = this.proxy('traits.name');
+  if (typeof name !== 'string') return;
+
+  var space = trim(name).indexOf(' ');
+  if (space === -1) return;
+
+  return trim(name.substr(space + 1));
+};
+
+/**
+ * Get the user's unique id.
+ *
+ * @return {String or undefined}
+ */
+
+Identify.prototype.uid = function(){
+  return this.userId()
+    || this.username()
+    || this.email();
+};
+
+/**
+ * Get description.
+ *
+ * @return {String}
+ */
+
+Identify.prototype.description = function(){
+  return this.proxy('traits.description')
+    || this.proxy('traits.background');
+};
+
+/**
+ * Get the age.
+ *
+ * If the age is not explicitly set
+ * the method will compute it from `.birthday()`
+ * if possible.
+ *
+ * @return {Number}
+ */
+
+Identify.prototype.age = function(){
+  var date = this.birthday();
+  var age = get(this.traits(), 'age');
+  if (null != age) return age;
+  if ('date' != type(date)) return;
+  var now = new Date;
+  return now.getFullYear() - date.getFullYear();
+};
+
+/**
+ * Get the avatar.
+ *
+ * .photoUrl needed because help-scout
+ * implementation uses `.avatar || .photoUrl`.
+ *
+ * .avatarUrl needed because trakio uses it.
+ *
+ * @return {Mixed}
+ */
+
+Identify.prototype.avatar = function(){
+  var traits = this.traits();
+  return get(traits, 'avatar')
+    || get(traits, 'photoUrl')
+    || get(traits, 'avatarUrl');
+};
+
+/**
+ * Get the position.
+ *
+ * .jobTitle needed because some integrations use it.
+ *
+ * @return {Mixed}
+ */
+
+Identify.prototype.position = function(){
+  var traits = this.traits();
+  return get(traits, 'position') || get(traits, 'jobTitle');
+};
+
+/**
+ * Setup sme basic "special" trait proxies.
+ */
+
+Identify.prototype.username = Facade.proxy('traits.username');
+Identify.prototype.website = Facade.one('traits.website');
+Identify.prototype.websites = Facade.multi('traits.website');
+Identify.prototype.phone = Facade.one('traits.phone');
+Identify.prototype.phones = Facade.multi('traits.phone');
+Identify.prototype.address = Facade.proxy('traits.address');
+Identify.prototype.gender = Facade.proxy('traits.gender');
+Identify.prototype.birthday = Facade.proxy('traits.birthday');
+
+}, {"./address":125,"./facade":116,"is-email":54,"new-date":44,"./utils":124,"obj-case":43,"trim":55}],
+120: [function(require, module, exports) {
+
+var inherit = require('./utils').inherit;
+var clone = require('./utils').clone;
+var type = require('./utils').type;
+var Facade = require('./facade');
+var Identify = require('./identify');
+var isEmail = require('is-email');
+var get = require('obj-case');
+
+/**
+ * Expose `Track` facade.
+ */
+
+module.exports = Track;
+
+/**
+ * Initialize a new `Track` facade with a `dictionary` of arguments.
+ *
+ * @param {object} dictionary
+ *   @property {String} event
+ *   @property {String} userId
+ *   @property {String} sessionId
+ *   @property {Object} properties
+ *   @property {Object} options
+ */
+
+function Track (dictionary) {
+  Facade.call(this, dictionary);
+}
+
+/**
+ * Inherit from `Facade`.
+ */
+
+inherit(Track, Facade);
+
+/**
+ * Return the facade's action.
+ *
+ * @return {String}
+ */
+
+Track.prototype.type =
+Track.prototype.action = function () {
+  return 'track';
+};
+
+/**
+ * Setup some basic proxies.
+ */
+
+Track.prototype.event = Facade.field('event');
+Track.prototype.value = Facade.proxy('properties.value');
+
+/**
+ * Misc
+ */
+
+Track.prototype.category = Facade.proxy('properties.category');
+
+/**
+ * Ecommerce
+ */
+
+Track.prototype.id = Facade.proxy('properties.id');
+Track.prototype.sku = Facade.proxy('properties.sku');
+Track.prototype.tax = Facade.proxy('properties.tax');
+Track.prototype.name = Facade.proxy('properties.name');
+Track.prototype.price = Facade.proxy('properties.price');
+Track.prototype.total = Facade.proxy('properties.total');
+Track.prototype.coupon = Facade.proxy('properties.coupon');
+Track.prototype.shipping = Facade.proxy('properties.shipping');
+Track.prototype.discount = Facade.proxy('properties.discount');
+
+/**
+ * Description
+ */
+
+Track.prototype.description = Facade.proxy('properties.description');
+
+/**
+ * Plan
+ */
+
+Track.prototype.plan = Facade.proxy('properties.plan');
+
+/**
+ * Order id.
+ *
+ * @return {String}
+ * @api public
+ */
+
+Track.prototype.orderId = function(){
+  return this.proxy('properties.id')
+    || this.proxy('properties.orderId');
+};
+
+/**
+ * Get subtotal.
+ *
+ * @return {Number}
+ */
+
+Track.prototype.subtotal = function(){
+  var subtotal = get(this.properties(), 'subtotal');
+  var total = this.total();
+  var n;
+
+  if (subtotal) return subtotal;
+  if (!total) return 0;
+  if (n = this.tax()) total -= n;
+  if (n = this.shipping()) total -= n;
+  if (n = this.discount()) total += n;
+
+  return total;
+};
+
+/**
+ * Get products.
+ *
+ * @return {Array}
+ */
+
+Track.prototype.products = function(){
+  var props = this.properties();
+  var products = get(props, 'products');
+  return 'array' == type(products)
+    ? products
+    : [];
+};
+
+/**
+ * Get quantity.
+ *
+ * @return {Number}
+ */
+
+Track.prototype.quantity = function(){
+  var props = this.obj.properties || {};
+  return props.quantity || 1;
+};
+
+/**
+ * Get currency.
+ *
+ * @return {String}
+ */
+
+Track.prototype.currency = function(){
+  var props = this.obj.properties || {};
+  return props.currency || 'USD';
+};
+
+/**
+ * BACKWARDS COMPATIBILITY: should probably re-examine where these come from.
+ */
+
+Track.prototype.referrer = Facade.proxy('properties.referrer');
+Track.prototype.query = Facade.proxy('options.query');
+
+/**
+ * Get the call's properties.
+ *
+ * @param {Object} aliases
+ * @return {Object}
+ */
+
+Track.prototype.properties = function (aliases) {
+  var ret = this.field('properties') || {};
+  aliases = aliases || {};
+
+  for (var alias in aliases) {
+    var value = null == this[alias]
+      ? this.proxy('properties.' + alias)
+      : this[alias]();
+    if (null == value) continue;
+    ret[aliases[alias]] = value;
+    delete ret[alias];
+  }
+
+  return ret;
+};
+
+/**
+ * Get the call's username.
+ *
+ * @return {String or Undefined}
+ */
+
+Track.prototype.username = function () {
+  return this.proxy('traits.username') ||
+         this.proxy('properties.username') ||
+         this.userId() ||
+         this.sessionId();
+};
+
+/**
+ * Get the call's email, using an the user ID if it's a valid email.
+ *
+ * @return {String or Undefined}
+ */
+
+Track.prototype.email = function () {
+  var email = this.proxy('traits.email');
+  email = email || this.proxy('properties.email');
+  if (email) return email;
+
+  var userId = this.userId();
+  if (isEmail(userId)) return userId;
+};
+
+/**
+ * Get the call's revenue, parsing it from a string with an optional leading
+ * dollar sign.
+ *
+ * For products/services that don't have shipping and are not directly taxed,
+ * they only care about tracking `revenue`. These are things like
+ * SaaS companies, who sell monthly subscriptions. The subscriptions aren't
+ * taxed directly, and since it's a digital product, it has no shipping.
+ *
+ * The only case where there's a difference between `revenue` and `total`
+ * (in the context of analytics) is on ecommerce platforms, where they want
+ * the `revenue` function to actually return the `total` (which includes
+ * tax and shipping, total = subtotal + tax + shipping). This is probably
+ * because on their backend they assume tax and shipping has been applied to
+ * the value, and so can get the revenue on their own.
+ *
+ * @return {Number}
+ */
+
+Track.prototype.revenue = function () {
+  var revenue = this.proxy('properties.revenue');
+  var event = this.event();
+
+  // it's always revenue, unless it's called during an order completion.
+  if (!revenue && event && event.match(/completed ?order/i)) {
+    revenue = this.proxy('properties.total');
+  }
+
+  return currency(revenue);
+};
+
+/**
+ * Get cents.
+ *
+ * @return {Number}
+ */
+
+Track.prototype.cents = function(){
+  var revenue = this.revenue();
+  return 'number' != typeof revenue
+    ? this.value() || 0
+    : revenue * 100;
+};
+
+/**
+ * A utility to turn the pieces of a track call into an identify. Used for
+ * integrations with super properties or rate limits.
+ *
+ * TODO: remove me.
+ *
+ * @return {Facade}
+ */
+
+Track.prototype.identify = function () {
+  var json = this.json();
+  json.traits = this.traits();
+  return new Identify(json);
+};
+
+/**
+ * Get float from currency value.
+ *
+ * @param {Mixed} val
+ * @return {Number}
+ */
+
+function currency(val) {
+  if (!val) return;
+  if (typeof val === 'number') return val;
+  if (typeof val !== 'string') return;
+
+  val = val.replace(/\$/g, '');
+  val = parseFloat(val);
+
+  if (!isNaN(val)) return val;
+}
+
+}, {"./utils":124,"./facade":116,"./identify":119,"is-email":54,"obj-case":43}],
+121: [function(require, module, exports) {
+
+var inherit = require('./utils').inherit;
+var Facade = require('./facade');
+var Track = require('./track');
+
+/**
+ * Expose `Page` facade
+ */
+
+module.exports = Page;
+
+/**
+ * Initialize new `Page` facade with `dictionary`.
+ *
+ * @param {Object} dictionary
+ *   @param {String} category
+ *   @param {String} name
+ *   @param {Object} traits
+ *   @param {Object} options
+ */
+
+function Page(dictionary){
+  Facade.call(this, dictionary);
+}
+
+/**
+ * Inherit from `Facade`
+ */
+
+inherit(Page, Facade);
+
+/**
+ * Get the facade's action.
+ *
+ * @return {String}
+ */
+
+Page.prototype.type =
+Page.prototype.action = function(){
+  return 'page';
+};
+
+/**
+ * Fields
+ */
+
+Page.prototype.category = Facade.field('category');
+Page.prototype.name = Facade.field('name');
+
+/**
+ * Proxies.
+ */
+
+Page.prototype.title = Facade.proxy('properties.title');
+Page.prototype.path = Facade.proxy('properties.path');
+Page.prototype.url = Facade.proxy('properties.url');
+
+/**
+ * Referrer.
+ */
+
+Page.prototype.referrer = function(){
+  return this.proxy('properties.referrer')
+    || this.proxy('context.referrer.url');
+};
+
+/**
+ * Get the page properties mixing `category` and `name`.
+ *
+ * @param {Object} aliases
+ * @return {Object}
+ */
+
+Page.prototype.properties = function(aliases) {
+  var props = this.field('properties') || {};
+  var category = this.category();
+  var name = this.name();
+  aliases = aliases || {};
+
+  if (category) props.category = category;
+  if (name) props.name = name;
+
+  for (var alias in aliases) {
+    var value = null == this[alias]
+      ? this.proxy('properties.' + alias)
+      : this[alias]();
+    if (null == value) continue;
+    props[aliases[alias]] = value;
+    if (alias !== aliases[alias]) delete props[alias];
+  }
+
+  return props;
+};
+
+/**
+ * Get the page fullName.
+ *
+ * @return {String}
+ */
+
+Page.prototype.fullName = function(){
+  var category = this.category();
+  var name = this.name();
+  return name && category
+    ? category + ' ' + name
+    : name;
+};
+
+/**
+ * Get event with `name`.
+ *
+ * @return {String}
+ */
+
+Page.prototype.event = function(name){
+  return name
+    ? 'Viewed ' + name + ' Page'
+    : 'Loaded a Page';
+};
+
+/**
+ * Convert this Page to a Track facade with `name`.
+ *
+ * @param {String} name
+ * @return {Track}
+ */
+
+Page.prototype.track = function(name){
+  var props = this.properties();
+  return new Track({
+    event: this.event(name),
+    timestamp: this.timestamp(),
+    context: this.context(),
+    properties: props
+  });
+};
+
+}, {"./utils":124,"./facade":116,"./track":120}],
+122: [function(require, module, exports) {
+
+var inherit = require('./utils').inherit;
+var Page = require('./page');
+var Track = require('./track');
+
+/**
+ * Expose `Screen` facade
+ */
+
+module.exports = Screen;
+
+/**
+ * Initialize new `Screen` facade with `dictionary`.
+ *
+ * @param {Object} dictionary
+ *   @param {String} category
+ *   @param {String} name
+ *   @param {Object} traits
+ *   @param {Object} options
+ */
+
+function Screen(dictionary){
+  Page.call(this, dictionary);
+}
+
+/**
+ * Inherit from `Page`
+ */
+
+inherit(Screen, Page);
+
+/**
+ * Get the facade's action.
+ *
+ * @return {String}
+ * @api public
+ */
+
+Screen.prototype.type =
+Screen.prototype.action = function(){
+  return 'screen';
+};
+
+/**
+ * Get event with `name`.
+ *
+ * @param {String} name
+ * @return {String}
+ * @api public
+ */
+
+Screen.prototype.event = function(name){
+  return name
+    ? 'Viewed ' + name + ' Screen'
+    : 'Loaded a Screen';
+};
+
+/**
+ * Convert this Screen.
+ *
+ * @param {String} name
+ * @return {Track}
+ * @api public
+ */
+
+Screen.prototype.track = function(name){
+  var props = this.properties();
+  return new Track({
+    event: this.event(name),
+    timestamp: this.timestamp(),
+    context: this.context(),
+    properties: props
+  });
+};
+
+}, {"./utils":124,"./page":121,"./track":120}],
 114: [function(require, module, exports) {
 
 /**
@@ -10220,8 +11604,8 @@ module.exports = function(arr, fn){
   return ret;
 };
 
-}, {"to-function":75}],
-85: [function(require, module, exports) {
+}, {"to-function":74}],
+84: [function(require, module, exports) {
 
 /**
  * Module dependencies.
@@ -10313,8 +11697,8 @@ function convertDates(properties) {
   return convert(properties, function(date) { return date.getTime(); });
 }
 
-}, {"convert-dates":116,"analytics.js-integration":92,"global-queue":114}],
-116: [function(require, module, exports) {
+}, {"convert-dates":126,"analytics.js-integration":91,"global-queue":114}],
+126: [function(require, module, exports) {
 
 var is = require('is');
 
@@ -10350,7 +11734,7 @@ function convertDates (obj, convert) {
   return obj;
 }
 }, {"is":19,"clone":13}],
-86: [function(require, module, exports) {
+85: [function(require, module, exports) {
 
 /**
  * Module dependencies.
@@ -10546,8 +11930,8 @@ function api() {
   window.Intercom.apply(window.Intercom, arguments);
 }
 
-}, {"alias":117,"convert-dates":116,"defaults":111,"obj-case":43,"analytics.js-integration":92,"is":19}],
-117: [function(require, module, exports) {
+}, {"alias":127,"convert-dates":126,"defaults":110,"obj-case":43,"analytics.js-integration":91,"is":19}],
+127: [function(require, module, exports) {
 
 var type = require('type');
 
@@ -10611,7 +11995,7 @@ function aliasByFunction (obj, convert) {
   return output;
 }
 }, {"type":48,"clone":50}],
-87: [function(require, module, exports) {
+86: [function(require, module, exports) {
 
 /**
  * Module dependencies.
@@ -10808,8 +12192,8 @@ Keen.prototype.addons = function(obj, msg) {
   };
 };
 
-}, {"analytics.js-integration":92,"clone":13}],
-88: [function(require, module, exports) {
+}, {"analytics.js-integration":91,"clone":13}],
+87: [function(require, module, exports) {
 
 /**
  * Module dependencies.
@@ -10994,8 +12378,8 @@ function prefix(event, properties) {
   return prefixed;
 }
 
-}, {"each":4,"analytics.js-integration":92,"is":19,"global-queue":114}],
-89: [function(require, module, exports) {
+}, {"each":4,"analytics.js-integration":91,"is":19,"global-queue":114}],
+88: [function(require, module, exports) {
 
 /**
  * Module dependencies.
@@ -11228,8 +12612,8 @@ function lowercase(arr) {
   return ret;
 }
 
-}, {"alias":117,"convert-dates":116,"obj-case":43,"each":4,"includes":73,"analytics.js-integration":92,"is":19,"to-iso-string":118,"some":119}],
-118: [function(require, module, exports) {
+}, {"alias":127,"convert-dates":126,"obj-case":43,"each":4,"includes":72,"analytics.js-integration":91,"is":19,"to-iso-string":128,"some":129}],
+128: [function(require, module, exports) {
 
 /**
  * Expose `toIsoString`.
@@ -11271,7 +12655,7 @@ function pad (number) {
   return n.length === 1 ? '0' + n : n;
 }
 }, {}],
-119: [function(require, module, exports) {
+129: [function(require, module, exports) {
 
 /**
  * some
@@ -11305,7 +12689,7 @@ module.exports = function (arr, fn) {
 };
 
 }, {}],
-90: [function(require, module, exports) {
+89: [function(require, module, exports) {
 
 /**
  * Module dependencies.
@@ -11512,8 +12896,8 @@ Quantcast.prototype._labels = function(type) {
   return [type, ret].join('.');
 };
 
-}, {"analytics.js-integration":92,"global-queue":114,"reduce":120,"use-https":113}],
-120: [function(require, module, exports) {
+}, {"analytics.js-integration":91,"global-queue":114,"reduce":130,"use-https":112}],
+130: [function(require, module, exports) {
 
 /**
  * Reduce `arr` with `fn`.
@@ -11539,7 +12923,7 @@ module.exports = function(arr, fn, initial){
   return curr;
 };
 }, {}],
-91: [function(require, module, exports) {
+90: [function(require, module, exports) {
 
 /**
  * Module dependencies.
@@ -11814,8 +13198,8 @@ function scheme() {
 
 function noop() {}
 
-}, {"ad-params":121,"clone":13,"cookie":59,"extend":71,"analytics.js-integration":92,"segmentio/json@1.0.0":60,"store":122,"protocol":123,"send-json":124,"top-domain":93,"utm-params":125,"uuid":80}],
-121: [function(require, module, exports) {
+}, {"ad-params":131,"clone":13,"cookie":58,"extend":70,"analytics.js-integration":91,"segmentio/json@1.0.0":59,"store":132,"protocol":133,"send-json":134,"top-domain":92,"utm-params":135,"uuid":79}],
+131: [function(require, module, exports) {
 /**
  * Module dependencies.
  */
@@ -11859,7 +13243,7 @@ function ads(query){
   }
 }
 }, {"querystring":28}],
-122: [function(require, module, exports) {
+132: [function(require, module, exports) {
 
 /**
  * dependencies.
@@ -11954,8 +13338,8 @@ function all(){
   return ret;
 }
 
-}, {"unserialize":126,"each":102}],
-126: [function(require, module, exports) {
+}, {"unserialize":136,"each":101}],
+136: [function(require, module, exports) {
 
 /**
  * Unserialize the given "stringified" javascript.
@@ -11973,7 +13357,7 @@ module.exports = function(val){
 };
 
 }, {}],
-123: [function(require, module, exports) {
+133: [function(require, module, exports) {
 
 /**
  * Convenience alias
@@ -12056,7 +13440,7 @@ function set (protocol) {
 }
 
 }, {}],
-124: [function(require, module, exports) {
+134: [function(require, module, exports) {
 /**
  * Module dependencies.
  */
@@ -12155,8 +13539,8 @@ function base64(url, obj, _, fn){
   });
 }
 
-}, {"base64-encode":127,"has-cors":128,"jsonp":129,"json":60}],
-127: [function(require, module, exports) {
+}, {"base64-encode":137,"has-cors":138,"jsonp":139,"json":59}],
+137: [function(require, module, exports) {
 var utf8Encode = require('utf8-encode');
 var keyStr = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=';
 
@@ -12193,8 +13577,8 @@ function encode(input) {
 
     return output;
 }
-}, {"utf8-encode":130}],
-130: [function(require, module, exports) {
+}, {"utf8-encode":140}],
+140: [function(require, module, exports) {
 module.exports = encode;
 
 function encode(string) {
@@ -12223,7 +13607,7 @@ function encode(string) {
     return utftext;
 }
 }, {}],
-128: [function(require, module, exports) {
+138: [function(require, module, exports) {
 
 /**
  * Module exports.
@@ -12243,7 +13627,7 @@ try {
 }
 
 }, {}],
-129: [function(require, module, exports) {
+139: [function(require, module, exports) {
 /**
  * Module dependencies
  */
@@ -12330,7 +13714,7 @@ function jsonp(url, opts, fn){
 }
 
 }, {"debug":15}],
-125: [function(require, module, exports) {
+135: [function(require, module, exports) {
 
 /**
  * Module dependencies.
