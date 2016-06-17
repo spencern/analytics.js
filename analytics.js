@@ -9306,7 +9306,7 @@ module.exports = exports = function(analytics) {
  * https://developers.google.com/analytics/devguides/collection/gajs/methods/gaJSApiBasicConfiguration#_gat.GA_Tracker_._setSiteSpeedSampleRate
  */
 
-var GA = exports.Integration = integration('Google Analytics')
+var GA = exports.Integration = integration('GoogleAnalytics')
   .readyOnLoad()
   .global('ga')
   .global('gaplugins')
@@ -10624,7 +10624,7 @@ var clone = require('clone');
  * Expose `Keen IO` integration.
  */
 
-var Keen = module.exports = integration('Keen IO')
+var Keen = module.exports = integration('KeenIO')
   .global('Keen')
   .option('ipAddon', false)
   .option('projectId', '')
@@ -11573,7 +11573,7 @@ var cookieOptions = {
  * Expose `Segment` integration.
  */
 
-var Segment = exports = module.exports = integration('Segment.io')
+var Segment = exports = module.exports = integration('Segmentio')
   .option('apiKey', '');
 
 /**
